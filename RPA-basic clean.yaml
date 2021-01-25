@@ -1,0 +1,231 @@
+# This YAML is delivered as-is, no rights can be derived from this.
+# This is meant as an illustration to show autoscaling in roboservers.
+# Jesper Scherpenhuijsen
+#
+#
+# Uncomment the following if you want to run Kofax RPA in its own namespace, then you will also need to uncomment the namespace entry with every service and deployment
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: rpa
+
+---
+# Uncomment the following if you want to use a local Microsoft SQL Server container (it is volatile, as in: every reboot will cause the db to reset.)
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: mssql
+#   namespace: rpa
+# spec:
+#   ports:
+#   - port: 1433
+#   selector:
+#     app: mssql
+#   clusterIP: None
+
+# ---
+# Uncomment the following if you want to use a local Microsoft SQL Server container (it is volatile, as in: every reboot will cause the db to reset.)
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: mssql
+#   namespace: rpa
+# spec:
+#   selector:
+#     matchLabels:
+#       app: mssql
+#   strategy:
+#     type: Recreate
+#   template:
+#     metadata:
+#       labels:
+#         app: mssql
+#     spec:
+#       nodeSelector:
+#         beta.kubernetes.io/os: linux
+#       containers:
+#       - image: mcr.microsoft.com/mssql/server:2017-latest-ubuntu
+#         name: mssql
+#         imagePullPolicy: Always
+#         env:
+#         - name: ACCEPT_EULA
+#           value: "Y"
+#         - name: SA_PASSWORD
+#           value: "YOUROWNVERYSAFEPASSWORD"
+#         - name: CREATE_SCHEMA
+#           value: "true"          
+#         - name: ACCEPT_EULA
+#           value: "Y"
+#         ports:
+#         - containerPort: 1433
+#           name: mssql
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: managementconsole
+  # namespace: rpa
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8080
+  selector:
+    app: managementconsole
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: managementconsole
+  # namespace: rpa
+  labels:
+    app: managementconsole
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: managementconsole
+  template:
+    metadata:
+      labels:
+        app: managementconsole
+        environment: dev
+    spec:
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+      containers:
+      - name: managementconsole
+        image: jscherpe/managementconsole:11.1.0.2
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "250m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        env:
+        - name: CONTEXT_RESOURCE_VALIDATIONQUERY
+          value: "SELECT 1"
+        - name: CONTEXT_RESOURCE_USERNAME
+          value: yoursqluser@yourazuresqlserver
+        - name: CONTEXT_RESOURCE_PASSWORD
+          value: YOUROWNVERYSAFEPASSWORD
+        - name: CONTEXT_RESOURCE_DRIVERCLASSNAME
+          value: com.microsoft.sqlserver.jdbc.SQLServerDriver
+        - name: CONTEXT_RESOURCE_URL
+          # Use the following line if you run a local MSsql 
+          # value: jdbc:sqlserver://mssql:1433;database=master;
+          # Use the following line if you run a Azure SQL DB on Azure 
+          value: jdbc:sqlserver://yourazuresqlserver.database.windows.net:1433;database=MC;encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.database.windows.net;loginTimeout=30;
+        - name: CONFIG_LICENSE_COMPANY
+          value: YOURCOMPANYLICENSECODE
+        - name: CONFIG_LICENSE_PRODUCTIONKEY
+          value: YOURPRODUCTIONKEY
+        - name: CONFIG_LICENSE_NONPRODUCTIONKEY
+          value: YOURNONPRODUCTIONKEY
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: roboserver
+  # namespace: rpa
+spec:
+  ports:
+  - port: 50000
+  selector:
+    app: roboserver
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roboserver
+  # namespace: rpa
+  labels:
+    app: roboserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: roboserver
+  template:
+    metadata:
+      labels:
+        app: roboserver
+        environment: dev
+    spec:
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+      containers:
+      - name: roboserver
+        image: jscherpe/roboserver:11.1.0.2
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "125m"
+          limits:
+            memory: "2Gi"
+            cpu: "750m"
+        ports:
+        - containerPort: 50000
+        readinessProbe:
+          tcpSocket:
+            port: 50000
+          initialDelaySeconds: 50
+          periodSeconds: 100
+        livenessProbe:
+          tcpSocket:
+            port: 50000
+          initialDelaySeconds: 150
+          periodSeconds: 200
+        env:
+        - name: ROBOSERVER_ENABLE_MC_REGISTRATION
+          value: "true"
+        - name: ROBOSERVER_MC_CLUSTER
+          value: "Production"
+        - name: ROBOSERVER_MC_USERNAME
+          value: admin
+        - name: ROBOSERVER_MC_PASSWORD
+          value: admin
+        - name: ROBOSERVER_MC_URL
+          value: http://managementconsole:8080
+        - name: ROBOSERVER_ENABLE_SOCKET_SERVICE
+          value: "true"
+        - name: WRAPPER_MAX_MEMORY
+          value: "2048"
+
+---
+# The following is responsible for the autoscaling.
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: roboserver
+spec:
+  scaleTargetRef:
+    kind: Deployment
+    name: roboserver
+    apiVersion: apps/v1
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75
+
