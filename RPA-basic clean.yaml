@@ -1,6 +1,6 @@
 # This YAML is delivered as-is, no rights can be derived from this.
 # This is meant as an illustration to show autoscaling in roboservers.
-# Jesper Scherpenhuijsen
+# Jesper Ewoud Scherpenhuijsen
 #
 #
 # Uncomment the following if you want to run Kofax RPA in its own namespace, then you will also need to uncomment the namespace entry with every service and deployment
